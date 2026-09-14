@@ -120,12 +120,13 @@ Want to use DS3 / DS4 ? Check this page [here](../../wiki/External-Controllers) 
   - Save it as Shared profile (Profile > Profile management > Save as Shared)
   - Go back to the game
   - Press **START**+**CROSS**(configurable under Settings > Hotkeys) to import Shared profile.
-- "Buy more RAM" error popup on menu open - means there is not enough RAM for plugin to initialise it's menu. Seems to be caused by usage of other heavy plugins, especially ucdc and PSVShell.
+- "Buy more RAM" error popup on menu open (versions up to 1.1.2) - the menu used to allocate a 512 KB kernel buffer every time it opened, which failed when other heavy kernel plugins (ucdc, PSVShell) had used up the kernel memory. Since 1.2 the menu draws into a small static buffer, so the popup no longer exists; update reVita.
 - Crash, when closing the menu
   - update reVita and ds34vita to latest versions (from github) 
 ## Build
-- Make install **[ds34vita](https://github.com/MERLev/ds34vita)**.
-- Make install **[DS34Motion](https://github.com/MERLev/DS34Motion)**
+- Install [VitaSDK](https://vitasdk.org) and the `taihen` and `libk` packages (`vdpm install taihen libk`).
+- Make install **[ds34vita](https://github.com/MERLev/ds34vita)** (only its stub library is needed).
+- Make install **[DS34Motion](https://github.com/MERLev/DS34Motion)** (only its kernel stub library is needed, for reVitaMotion).
 - Make install kernel module
 ```bash
 cd reVita
@@ -142,6 +143,8 @@ cd build
 cmake ..
 make
 ```
+- Make the headless (no menu) kernel module the same way from `reVitaHeadless`. The `fio/`, `ini`, `log` and `remap` sources are shared between `reVita` and `reVitaHeadless`; keep them in sync.
+- Building from the repository root (`cmake ..` in the top directory) builds all three; pass `-DREVITA_LOG_DEBUG=ON` for verbose kernel logging.
 
 ## Credits
 

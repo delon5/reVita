@@ -11,8 +11,15 @@ endif()
 project(reVita)
 include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O3 -std=gnu99")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -nostdlib")
+# -Os instead of -O3: the module text is resident kernel RAM and nothing here is
+# performance critical (measured: -O3 118 KB, -O2 98 KB, -Os 80 KB of text).
+# Do not add --gc-sections: it discards the exported syscall functions and
+# module_stop, and vita-elf-create then fails to create the SELF.
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -Os -std=gnu99")
+# -Wl,--defsym=__sce_headroom reserves room after the text segment for the SCE
+# module info that vita-elf-create appends; without it the link can pack the
+# segments too tightly ("Cannot allocate ... bytes for SCE data at end of segment 0").
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -nostdlib -Wl,--defsym=__sce_headroom=0x1000")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fno-rtti -fno-exceptions")
 
 add_definitions(-DRELEASE) 
@@ -36,6 +43,8 @@ add_executable(${PROJECT_NAME}
   src/fio/hotkeys.c
   src/gui/renderer.c
   src/gui/rendererv.c
+  src/gui/img/font-data.c
+  src/gui/img/icons-font-data.c
   src/gui/gui.c
   src/gui/menu/menu.c
   src/gui/menu/menu-main.c

@@ -74,7 +74,6 @@ enum MENU_ID whitelistedMenus[] = {
 Menu* menus[MENU_ID__NUM];
 Menu* gui_menu;
 
-SceUID mem_uid;
 int64_t tickUIOpen = 0;
 int64_t tickUIClose = 0;
 int64_t tickMenuOpen = 0;
@@ -487,12 +486,9 @@ void gui_prevEntry(){
 	}
 }
 
-void gui_open(const SceDisplayFrameBuf *pParam){
-	if (rendererv_allocVirtualFB() < 0){
-		LOG("memory allocation for menu failed\n");
-		gui_popupShowDanger("Error", "Buy more RAM !", TTL_POPUP_LONG);
-		return;
-	}
+void gui_open(void){
+	// The menu draws into a static virtual framebuffer (rendererv.c), so
+	// nothing has to be allocated here and opening the menu cannot fail.
 	ksceKernelLockMutex(mutex_gui_uid, 1, NULL);
 	gui_setIdx(0);
 	gui_isOpen = true;
@@ -502,7 +498,6 @@ void gui_open(const SceDisplayFrameBuf *pParam){
 }
 void gui_close(){
 	ksceKernelLockMutex(mutex_gui_uid, 1, NULL);
-	rendererv_freeVirtualFB();
 	gui_isOpen = false;
 	tickUIClose = ksceKernelGetSystemTimeWide();
 	profile.version = ksceKernelGetSystemTimeWide();
@@ -520,12 +515,13 @@ void gui_close(){
 		} else {
 
 			char profile_to_save[64];
-			sprintf(profile_to_save, isSecondaryProfileLoaded ? "%s%s" : "%s", titleid, SECONDARY_PROFILE_SUFFIX);
+			snprintf(profile_to_save, sizeof(profile_to_save), isSecondaryProfileLoaded ? "%s%s" : "%s", titleid, SECONDARY_PROFILE_SUFFIX);
 			
-			profile_save(profile_to_save);
-			if (settings[POP_SAVE].v.b) {
+			if (!profile_save(profile_to_save)){
+				gui_popupShowDanger("$! Profile NOT saved", "too many rules for INI", TTL_POPUP_LONG);
+			} else if (settings[POP_SAVE].v.b) {
 				char pop_message[64];
-				sprintf(pop_message, isSecondaryProfileLoaded ? "%s (secondary)" : "%s", titleid);
+				snprintf(pop_message, sizeof(pop_message), isSecondaryProfileLoaded ? "%s (secondary)" : "%s", titleid);
 				gui_popupShowSuccess("$G Profile saved", pop_message, TTL_POPUP_SHORT);
 			}
 		}
@@ -567,6 +563,7 @@ void gui_init(){
 }
 void gui_destroy(){
 	renderer_destroy();
+	rendererv_destroy();
     if (mutex_gui_uid >= 0)
         ksceKernelDeleteMutex(mutex_gui_uid);
 }

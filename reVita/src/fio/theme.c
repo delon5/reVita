@@ -11,7 +11,7 @@
 #define PATH "ur0:/data/reVita"
 #define PATH_THEME "ur0:/data/reVita/Theme"
 #define EXT_INI "INI"
-#define BUFFER_SIZE_THEME (1000 * sizeof(char)+ 0xfff) & ~0xfff
+#define BUFFER_SIZE_THEME 4096
 
 const char* THEME_COLOR_STR[THEME_COLOR__NUM] = {
 	"Default",
@@ -50,13 +50,13 @@ enum THEME_ID theme_findIdByKey(char* n){
 uint32_t theme[THEME_COLOR__NUM];
 
 bool generateINITheme(char* buff){
-	INI _ini = ini_create(buff, 99);
+	INI _ini = ini_create(buff, BUFFER_SIZE_THEME);
 	INI* ini = &_ini;
 	
 	ini_addSection(ini, SECTION);
 	for (int i = 0; i < THEME_COLOR__NUM; i++)
 		ini_addBGR(ini, THEME_COLOR_STR[i], theme[i]);
-	return true;
+	return ini_ok(ini);
 }
 bool parseINITheme(char* buff){
 	INI_READER _ini = ini_read(buff);

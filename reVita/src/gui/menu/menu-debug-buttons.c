@@ -29,10 +29,10 @@ void onDraw_debugButtons(uint menuY){
     int y = menuY;
     int x = L_1;
 	uint buttons = ctrl.buttons;
-	renderer_setColor(theme[COLOR_HEADER]);
+	rendererv_setColor(theme[COLOR_HEADER]);
 	rendererv_drawStringF(L_1, y += CHA_H, "             Port: [%i]", port);
 	if (ret < 1){
-		renderer_setColor(theme[COLOR_DANGER]);
+		rendererv_setColor(theme[COLOR_DANGER]);
 		rendererv_drawString(L_1, y += CHA_H, "ERROR READING INPUT");
 		return;
 	}
@@ -44,7 +44,7 @@ void onDraw_debugButtons(uint menuY){
 		gui_setColor(0, !btn_has(buttons, 1 << i));
 		rendererv_drawString(x += CHA_W*4, y, getBtnName(1 << i));
 	}
-	renderer_setColor(theme[COLOR_DEFAULT]);
+	rendererv_setColor(theme[COLOR_DEFAULT]);
 	rendererv_drawStringF(L_1, y += CHA_H, "$[: %i, $]: %i", 
 		ctrl.lt, ctrl.rt);
 	rendererv_drawStringF(L_1, y += CHA_H, "$U: [%i, %i], $u[%i, %i]", 

@@ -16,13 +16,13 @@ int result;
 bool reset = false;
 
 /*export*/ void reVita_getProfile(Profile* p){
-    ksceKernelMemcpyKernelToUser((uintptr_t)&p[0], &profile, sizeof(profile));
+    ksceKernelMemcpyKernelToUser((void*)&p[0], &profile, sizeof(profile));
 }
 
 /*export*/ int reVita_setSceMotionState(SceMotionState *pData, int r){
     ksceKernelLockMutex(mutex_sce_ms_uid, 1, NULL);
 
-    ksceKernelMemcpyUserToKernel(&sms, (uintptr_t)pData, sizeof(SceMotionState)); 
+    ksceKernelMemcpyUserToKernel(&sms, pData, sizeof(SceMotionState)); 
     result = r;
     tick = ksceKernelGetSystemTimeWide();
     int ret = reset;

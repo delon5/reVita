@@ -1,9 +1,13 @@
+#ifndef _INI_H_
+#define _INI_H_
+
 #include <stdbool.h>
 #include <vitasdkkern.h>
 #include <taihen.h>
 
+// Sizes of the INI_READER fields. The sscanf() widths in ini.c must match them.
 #define SECTION_SIZE 30
-#define SECTION_ATTR_SIZE 2
+#define SECTION_ATTR_SIZE 10
 #define ENTRY_NAME_SIZE 30
 #define ENTRY_VALUE_SIZE 150
 #define ENTRY_LIST_VALUE_SIZE 10
@@ -16,6 +20,8 @@ enum LINE_TYPE{
 typedef struct INI{  
     char* buff;
     char* idx;
+    int max;        // capacity of buff in bytes, terminator included
+    bool overflow;  // set when an append did not fit; the output is truncated then
 }INI;
 
 typedef struct INI_READER_INTERNAL{ //Holds inernal pointers
@@ -54,10 +60,14 @@ char* ini_nextLine(INI_READER* ini);
 char* ini_nextEntry(INI_READER* ini);
 char* ini_nextListVal(INI_READER* ini);
 
+// max is the capacity of buff in bytes; generated text never exceeds it
 struct INI ini_create(char* buff, int max);
+// true when everything appended so far fitted in the buffer
+bool ini_ok(struct INI* ini);
 struct INI_READER ini_read(char* buff);
-int ini_write(struct INI* ini, const char* p, const char* n);
 
 int parseInt(char* c);
 bool parseBool(char* c);
 int parseBGR(char* c);
+
+#endif

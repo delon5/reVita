@@ -11,7 +11,7 @@
 #include "ini.h"
 
 #define SECTION "HOTKEYS"
-#define BUFFER_SIZE_HOTKEYS (200 * sizeof(char)+ 0xfff) & ~0xfff
+#define BUFFER_SIZE_HOTKEYS 4096
 #define PATH "ur0:/data/reVita"
 #define NAME_SETTINGS "HOTKEYS"
 #define EXT "INI"
@@ -41,13 +41,13 @@ void addBtnsList(INI* ini, ProfileEntry* pe){
 }
 
 bool generateINIHotkeys(char* buff){
-	INI _ini = ini_create(buff, 99);
+	INI _ini = ini_create(buff, BUFFER_SIZE_HOTKEYS);
 	INI* ini = &_ini;
 
 	ini_addSection(ini, SECTION);
 	for (int i = 0; i < HOTKEY__NUM; i++)
 		addBtnsList(ini, &hotkeys[i]);
-	return true;
+	return ini_ok(ini);
 }
 
 void profile_parseINIButtons(INI_READER* ini, uint32_t* btns){

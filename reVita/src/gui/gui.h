@@ -3,9 +3,10 @@
 #include "../remap.h"
 #include "img/icons-font.h"
 #include "../fio/profile.h"
+#include "rendererv.h"
 
-#define UI_WIDTH            480
-#define UI_HEIGHT           272
+#define UI_WIDTH            VFB_W
+#define UI_HEIGHT           VFB_H
 #define HEADER_HEIGHT		(CHA_H + 6)
 #define BOTTOM_OFFSET		5
 #define L_0    				5		//Left margin for menu
@@ -150,7 +151,7 @@ void gui_setIdx(int i);
 
 void gui_input(SceCtrlData *ctrl);
 void gui_draw(const SceDisplayFrameBuf *pParam);
-void gui_open();
+void gui_open(void);
 void gui_close();
 
 void gui_popupShow(char* header, char* message, uint ttl);

@@ -7,12 +7,27 @@
 
 #define TRUE_STR "TRUE"
 #define FALSE_STR "FALSE"
+_Static_assert(SECTION_SIZE == 30 && SECTION_ATTR_SIZE == 10 && ENTRY_NAME_SIZE == 30 && ENTRY_VALUE_SIZE == 150,
+    "update the sscanf() field widths in ini_nextEntry()");
+
+// Bounded append: never writes past ini->max bytes. On overflow the text is
+// truncated and ini->overflow is set so the caller can refuse to save.
 void ini_append(struct INI* ini, const char *fmt, ...) {
+    int room = ini->max - (int)(ini->idx - ini->buff);
+    if (room <= 1){
+        ini->overflow = true;
+        return;
+    }
     va_list va;
     va_start (va, fmt);
-    vsprintf(ini->idx, fmt, va);
+    int n = vsnprintf(ini->idx, room, fmt, va);
     va_end (va);
-	ini->idx = &ini->idx[strlen(ini->idx)];
+    if (n < 0 || n >= room){
+        ini->overflow = true;
+        ini->idx = &ini->buff[ini->max - 1];
+        return;
+    }
+    ini->idx += n;
 }
 
 void ini_addNL(struct INI* ini){
@@ -66,18 +81,18 @@ char* ini_nextEntry(INI_READER* ini){
     if (ini->_.line[0] == '[') { // Looks like section
         char section[SECTION_SIZE];
         char sectionAttr[SECTION_ATTR_SIZE];
-        if (sscanf(ini->_.line, "[%127[^:]:%127[^]]", section, sectionAttr) == 2){ // Section with attr
+        if (sscanf(ini->_.line, "[%29[^:]:%9[^]]", section, sectionAttr) == 2){ // Section with attr
             strcpy(ini->section, section);
             strcpy(ini->sectionAttr, sectionAttr);
             return ini_nextEntry(ini);
-        } else if (sscanf (ini->_.line, "[%[^]]", section) == 1){ // Section without attr
+        } else if (sscanf (ini->_.line, "[%29[^]]", section) == 1){ // Section without attr
             strcpy(ini->section, section);
             return ini_nextEntry(ini);
         }// Error parsing
     } else if (strchr(ini->_.line, '=')){ // Looks like Entry
         char key[ENTRY_NAME_SIZE];
         char value[ENTRY_VALUE_SIZE];
-        int num = sscanf (ini->_.line, "%[^=]=%s", key, value);
+        int num = sscanf (ini->_.line, "%29[^=]=%149s", key, value);
         //ToDo sscanf seems to be broken, it should work
         // int num = sscanf (ini->_.line, "%[^=]=%[^;#]", key, value);
         if (num >= 1){
@@ -105,6 +120,8 @@ char* ini_nextListVal(INI_READER* ini){
     if (ini->_.EOE == NULL)
         ini->_.EOE = ini->_.EOL;
     int len = (ini->_.EOE - ini->_.listEntry)/sizeof(char);
+    if (len > ENTRY_LIST_VALUE_SIZE - 1)
+        len = ENTRY_LIST_VALUE_SIZE - 1;
     strncpy(ini->listVal, ini->_.listEntry, len);
     ini->listVal[len] = '\0';
     return &ini->listVal[0];
@@ -113,9 +130,15 @@ char* ini_nextListVal(INI_READER* ini){
 struct INI ini_create(char* buff, int max){
     struct INI ini;
     ini.buff = buff;
-	ini.buff[0] = '\0';
-	ini.idx = ini.buff;
+    ini.idx = buff;
+    ini.max = max;
+    ini.overflow = false;
+    if (max > 0)
+        buff[0] = '\0';
     return ini;
+}
+bool ini_ok(struct INI* ini){
+    return !ini->overflow;
 }
 struct INI_READER ini_read(char* buff){
     static struct INI_READER ini;
@@ -125,14 +148,13 @@ struct INI_READER ini_read(char* buff){
 }
 
 int parseInt(char* c){
-    if (c == NULL) 
+    int result = 0;
+    if (c == NULL || sscanf(c, "%d", &result) != 1)
         return 0;
-    int result;
-    sscanf(c, "%d", &result);
     return result;
 }
 bool parseBool(char* c){
-    return !strcmp(c, TRUE_STR) ? true : false;
+    return (c != NULL && !strcmp(c, TRUE_STR)) ? true : false;
 }
 void addNumber(int* val, uint8_t number, uint8_t pos){
     uint8_t alignedPos = (pos % 2) ? pos - 1 : pos + 1;

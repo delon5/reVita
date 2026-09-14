@@ -15,9 +15,12 @@
 #define NAME_SHARED "SHARED"
 #define NAME_HOME "HOME"
 #define EXT_INI "INI"
-#define BUFFER_SIZE (1000 * sizeof(char)+ 0xfff) & ~0xfff
+// Worst-case INI for a profile (43 entries + 25 rules listing every button)
+// is 10944 bytes, so three pages.
+#define BUFFER_SIZE 12288
 
 enum PROF_ID profile_findIdByKey(char* n){
+	if (n == NULL) return -1;
 	for (int i = 0; i < PROF__NUM; i++)
 		if (!strcmp(profile.entries[i].key, n)) 
 			return i;
@@ -34,13 +37,14 @@ static const char* SECTION_STR[SECTION__NUM] = {
 	"RULE"
 };
 enum SECTION getSectionId(char* n){
+	if (n == NULL) return -1;
 	for (int i = 0; i < SECTION__NUM; i++)
 		if (!strcmp(SECTION_STR[i], n)) 
 			return i;
 	return -1;
 };
 
-const char* REMAP_ACTION_TYPE_STR[REMAP_ACTION_TYPE_NUM] = {
+const char* REMAP_ACTION_TYPE_STR[] = {
     "BUTTON",
     "LEFT_ANALOG",
     "LEFT_ANALOG_DIGITAL",
@@ -55,14 +59,16 @@ const char* REMAP_ACTION_TYPE_STR[REMAP_ACTION_TYPE_NUM] = {
 	"REMAPSV2",
 	"DISABLED"
 };
+_Static_assert(SIZE(REMAP_ACTION_TYPE_STR) == REMAP_ACTION_TYPE_NUM, "REMAP_ACTION_TYPE_STR is out of sync with enum REMAP_ACTION_TYPE");
 enum REMAP_ACTION_TYPE getActionTypeId(char* n){
+	if (n == NULL) return -1;
 	for (int i = 0; i < REMAP_ACTION_TYPE_NUM; i++)
-		if (!strcmp(REMAP_ACTION_TYPE_STR[i], n)) 
+		if (REMAP_ACTION_TYPE_STR[i] != NULL && !strcmp(REMAP_ACTION_TYPE_STR[i], n)) 
 			return i;
 	return -1;
 }
 
-const char* REMAP_ACTION_STR[REMAP_ACTION_NUM] = {
+const char* REMAP_ACTION_STR[] = {
     "ANALOG_UP",
     "ANALOG_DOWN",
     "ANALOG_LEFT",
@@ -104,11 +110,14 @@ const char* REMAP_ACTION_STR[REMAP_ACTION_NUM] = {
     "REMAP_SYS_SAVE_RESTORE",
 	"REMAP_SYS_SAVE_DELETE",
     "REMAP_SYS_CALIBRATE_MOTION",
-	"REM_SWAP_TOUCHPADS"
+	"REM_SWAP_TOUCHPADS",	// REMAP_SYS_TOGGLE_SECONDARY: kept for profiles saved by older versions
+	"SWAP_TOUCHPADS"		// REMAP_REM_SWAP_TOUCHPADS (was missing, left the table one entry short)
 };
+_Static_assert(SIZE(REMAP_ACTION_STR) == REMAP_ACTION_NUM, "REMAP_ACTION_STR is out of sync with enum REMAP_ACTION");
 enum REMAP_ACTION getActionId(char* n){
+	if (n == NULL) return -1;
 	for (int i = 0; i < REMAP_ACTION_NUM; i++)
-		if (!strcmp(REMAP_ACTION_STR[i], n)) 
+		if (REMAP_ACTION_STR[i] != NULL && !strcmp(REMAP_ACTION_STR[i], n)) 
 			return i;
 	return -1;
 }
@@ -131,7 +140,7 @@ enum REMAP_KEY{
 	REMAP_KEY_EMU_REMAPSV_ACTION,
 	REMAP_KEY__NUM
 };
-const char* REMAP_KEY_STR[REMAP_KEY__NUM] = {
+const char* REMAP_KEY_STR[] = {
 	"PROPAGATE",
 	"TURBO",
 	"STICKY",
@@ -148,7 +157,9 @@ const char* REMAP_KEY_STR[REMAP_KEY__NUM] = {
 	"EMU_TOUCH_SWIPE_SMART",
 	"EMU_REMAPSV_ACTION"
 };
+_Static_assert(SIZE(REMAP_KEY_STR) == REMAP_KEY__NUM, "REMAP_KEY_STR is out of sync with enum REMAP_KEY");
 enum REMAP_KEY getRemapKeyId(char* n){
+	if (n == NULL) return -1;
 	for (int i = 0; i < REMAP_KEY__NUM; i++)
 		if (!strcmp(REMAP_KEY_STR[i], n)) 
 			return i;
@@ -181,6 +192,7 @@ const char*  HW_BUTTONS_STR[HW_BUTTONS_NUM] = {
 	"HEADPHONE"
 };
 int getButtonId(char* n){
+	if (n == NULL) return -1;
 	for (int i = 0; i < HW_BUTTONS_NUM; i++)
 		if (!strcmp(HW_BUTTONS_STR[i], n)) 
 			return i;
@@ -313,7 +325,7 @@ void profile_resetMore(){
 	profile_resetEntryById(PR_MO_DELAY_START);
 }
 bool generateINIProfile(Profile* p, char* buff){
-	INI _ini = ini_create(buff, 99);
+	INI _ini = ini_create(buff, BUFFER_SIZE);
 	INI* ini = &_ini;
 
 	//Profile 
@@ -402,7 +414,9 @@ bool generateINIProfile(Profile* p, char* buff){
 				break;
 		}
 	}
-	return true;
+	if (!ini_ok(ini))
+		LOG("generateINIProfile: profile does not fit in %i bytes\n", BUFFER_SIZE);
+	return ini_ok(ini);
 }
 bool parseINIProfile(Profile* p, char* buff){
 	profile_resetProfile(p);
@@ -425,8 +439,7 @@ bool parseINIProfile(Profile* p, char* buff){
 				}
 				break;
 			case SECTION_RULE:
-				ruleId = parseInt(ini->sectionAttr);
-				if (ruleId >= REMAP_NUM)
+				if (sscanf(ini->sectionAttr, "%d", &ruleId) != 1 || ruleId < 0 || ruleId >= REMAP_NUM)
 					continue;
 				if (ruleId + 1 > p->remapsNum)
 					p->remapsNum = ruleId + 1;
@@ -560,12 +573,12 @@ bool profile_save(char* titleId) {
 }
 bool profile_load(char* titleId) {
 
-	char profile_to_load[32];
+	char profile_to_load[64];
 
 	if (isSecondaryProfileLoaded)
-		sprintf(profile_to_load, "%s%s", titleId, SECONDARY_PROFILE_SUFFIX);
+		snprintf(profile_to_load, sizeof(profile_to_load), "%s%s", titleId, SECONDARY_PROFILE_SUFFIX);
 	else
-		sprintf(profile_to_load, "%s", titleId);
+		snprintf(profile_to_load, sizeof(profile_to_load), "%s", titleId);
 
     LOG("profile_load('%s')\n", profile_to_load);
 	if (strcmp(profile.titleid, HOME) == 0){  //If used home profile previously

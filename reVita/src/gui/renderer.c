@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <math.h>
 #include "img/font.h"
-#include "img/icons.h"
 #include "img/icons-font.h"
 #include "renderer.h"
 #include "rendererv.h"
@@ -22,6 +21,11 @@ static bool isStripped;
 uint32_t* fb_base;
 uint32_t fbWidth, fbHeight, fbPitch;
 
+// Scratch row for kernel->user copies. Every user of the renderer runs under
+// mutex_gui_uid (gui_draw), so one static buffer is enough.
+#define LINE_MAX 480
+static uint32_t line[LINE_MAX];
+
 #define UI_CORNER_RADIUS 9
 #define ANIMATION_TIME  120000
 static const unsigned char UI_CORNER_OFF[UI_CORNER_RADIUS] = {9, 7, 5, 4, 3, 2, 2, 1, 1};
@@ -35,32 +39,32 @@ bool readPixel(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const unsigned ch
 
 void drawPixel(int32_t x, int32_t y, uint32_t color){
 	if (x >= 0 && x < fbWidth && y >= 0 && y < fbHeight)
-		ksceKernelMemcpyKernelToUser((uintptr_t)&fb_base[y * fbPitch + x], &color, sizeof(color));
+		ksceKernelMemcpyKernelToUser((void*)&fb_base[y * fbPitch + x], &color, sizeof(color));
 }
 
 void renderer_blankFrame(){
-	uint32_t buff[fbWidth/4];
-	memset(&buff, BLACK, sizeof(buff));
-	for(int i = 0; i < fbHeight; i++)
-		for(int j = 0; j < 4; j++)
-			ksceKernelMemcpyKernelToUser(
-				(uintptr_t)&fb_base[i * fbPitch + j * fbWidth / 4], &buff[0], sizeof(buff));
-	// for(int i = 0; i < fbHeight; i++)
-	// 	for(int j = 0; i < 1; i++)
-	// 		ksceKernelMemcpyKernelToUser(
-	// 			(uintptr_t)&fb_base[i * fbPitch + j * fbWidth / 4], &buff[0], sizeof(buff));
+	for (int i = 0; i < LINE_MAX; i++)
+		line[i] = BLACK;
+	for (uint32_t i = 0; i < fbHeight; i++)
+		for (uint32_t x = 0; x < fbWidth; x += LINE_MAX){
+			uint32_t n = min(fbWidth - x, (uint32_t)LINE_MAX);
+			ksceKernelMemcpyKernelToUser((void*)&fb_base[i * fbPitch + x], line, n * sizeof(uint32_t));
+		}
 }
 
 void renderer_drawChar(char character, int x, int y){
-	character = character % ICON_ID__NUM;
-	renderer_drawImage(x, y, FONT_WIDTH, FONT_HEIGHT, &font[character * 40]);
+	unsigned char c = (unsigned char)character;	// every byte value has a glyph
+	renderer_drawImage(x, y, FONT_WIDTH, FONT_HEIGHT, &font[c * FONT_GLYPH_BYTES]);
 }
 
 void renderer_drawCharIcon(char character, int x, int y){
-	renderer_drawImage(x, y - 1, ICON_W, ICON_H, &ICON[character * 60]);
+	unsigned char c = (unsigned char)character;
+	if (c >= ICON_ID__NUM)
+		return;
+	renderer_drawImage(x, y - 1, ICON_W, ICON_H, &ICON[c * ICON_BYTES]);
 }
 
-void renderer_drawImage(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const unsigned char* img){
+void renderer_drawImage(int32_t x, int32_t y, int32_t w, int32_t h, const unsigned char* img){
 	uint32_t idx = 0;
 	uint8_t bitN = 0;
 	for (int j = 0; j < h; j++){
@@ -81,17 +85,19 @@ void renderer_drawImage(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const un
 }
 
 void renderer_drawString(int x, int y, const char *str){
-    for (size_t i = 0; i < strlen(str); i++){
+	size_t len = strlen(str);
+	for (size_t i = 0; i < len; i++){
 		if (str[i] == ' ') continue;
 		if (str[i] == '$'){
-			renderer_drawCharIcon(str[i+1], x + i * 12, y);
+			if (i + 1 >= len) break;	// stray '$' at the end of the string
+			renderer_drawCharIcon(str[i + 1], x + i * CHA_W, y);
 			i++;
 		} else {
-			renderer_drawChar(str[i], x + i * 12, y);
+			renderer_drawChar(str[i], x + i * CHA_W, y);
 		}
 	}
 	if (isStripped)
-		renderer_drawRectangle(x, y + CHA_H / 2, (strlen(str)) * CHA_W, 2);
+		renderer_drawRectangle(x, y + CHA_H / 2, len * CHA_W, 2);
 }
 
 void renderer_drawStringF(int x, int y, const char *format, ...){
@@ -99,19 +105,26 @@ void renderer_drawStringF(int x, int y, const char *format, ...){
 	va_list va;
 
 	va_start(va, format);
-	vsnprintf(str, 512, format, va);
+	vsnprintf(str, sizeof(str), format, va);
 	va_end(va);
 
 	renderer_drawString(x, y, str);
 }
 
-void renderer_drawRectangle(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-	if ((x + w) > fbWidth || (y + h) > fbHeight)
+void renderer_drawRectangle(int32_t x, int32_t y, int32_t w, int32_t h) {
+	if (w <= 0 || h <= 0)
 		return;
-	uint32_t line[w];
-	memset(&line[0], color, sizeof(line));
-	for (int j = y; j < y + h; j++)
-		ksceKernelMemcpyKernelToUser((uintptr_t)&fb_base[j * fbPitch + x], &line[0], sizeof(line));
+	int32_t x0 = max(x, 0), y0 = max(y, 0);
+	int32_t x1 = min(x + w, (int32_t)fbWidth), y1 = min(y + h, (int32_t)fbHeight);
+	if (x0 >= x1 || y0 >= y1)
+		return;
+	uint32_t n = min(x1 - x0, LINE_MAX);
+	for (uint32_t i = 0; i < n; i++)
+		line[i] = color;
+	for (int32_t j = y0; j < y1; j++)
+		for (int32_t xx = x0; xx < x1; xx += n)
+			ksceKernelMemcpyKernelToUser((void*)&fb_base[j * fbPitch + xx], line,
+				min(x1 - xx, (int32_t)n) * sizeof(uint32_t));
 }
 
 void renderer_drawLine(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
@@ -194,7 +207,8 @@ void renderer_writeFromVFB(int64_t tickOpened, bool anim){
 	int32_t ui_yAnimated = ui_y - (uiHeight + ui_y) * multiplyer;
 	uint32_t ui_yCalculated = max(ui_yAnimated, 0);
 	uint32_t ui_cutout = ui_yAnimated >= 0 ? 0 : -ui_yAnimated;
-		
+
+	rendererv_syncPalette();
 	for (int i = 0; i < uiHeight - ui_cutout; i++){
 		uint32_t off = 0;
 		if (i < UI_CORNER_RADIUS){
@@ -202,10 +216,11 @@ void renderer_writeFromVFB(int64_t tickOpened, bool anim){
 		} else if (i > uiHeight - UI_CORNER_RADIUS) {
 			off = UI_CORNER_OFF[uiHeight - i];
 		}
+		rendererv_expandRow(i + ui_cutout, line);
 		ksceKernelMemcpyKernelToUser(
-			(uintptr_t)&fb_base[(ui_yCalculated + i) * fbPitch + ui_x + off],
-			&vfb_base[(i + ui_cutout) * uiWidth + off],
-			sizeof(uint32_t) * (uiWidth - 2 * off));		
+			(void*)&fb_base[(ui_yCalculated + i) * fbPitch + ui_x + off],
+			&line[off],
+			sizeof(uint32_t) * (uiWidth - 2 * off));
 	}
 }
 

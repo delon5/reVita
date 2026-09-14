@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include "../log.h"
 
-#define TRANSFER_SIZE 		 (128 * 1024)
+#define TRANSFER_SIZE 		 (32 * 1024)	// one buffer per copied tree, page-exact
+#define ERROR_SHORT_WRITE	   0x90010003
 #define MAX_PATH_SIZE 		 		(512)
 #define ERROR_BLACKLISTED	   0x90010001
 #define ERROR_SUBFOLDER	       0x90010002
@@ -39,17 +40,22 @@ bool fio_exist(const char *path) {
     return ret != SCE_ERROR_ERRNO_ENOENT && ret != SCE_ERROR_ERRNO_ENODEV;
 }
 
+// Reads at most size - 1 bytes and always leaves buff NUL-terminated.
 bool fio_readFile(char* buff, int size, char* path, char* name, char* ext){
+	if (size < 1)
+		return false;
 	char fname[128];
-	sprintf(fname, "%s/%s.%s", path, name, ext);
-	SceUID fd;
-	fd = ksceIoOpen(fname, SCE_O_RDONLY, 0777);
+	snprintf(fname, sizeof(fname), "%s/%s.%s", path, name, ext);
+	SceUID fd = ksceIoOpen(fname, SCE_O_RDONLY, 0777);
 	if (fd < 0)
 		return false;
-	ksceIoRead(fd, buff, size);
-	if (ksceIoClose(fd) < 0)
+	int read = ksceIoRead(fd, buff, size - 1);
+	ksceIoClose(fd);
+	if (read < 0){
+		buff[0] = '\0';
 		return false;
-	
+	}
+	buff[read] = '\0';
 	return true;
 }
 bool fio_writeFile(char* buff, int size, char* path, char* name, char* ext){
@@ -57,7 +63,7 @@ bool fio_writeFile(char* buff, int size, char* path, char* name, char* ext){
 	ksceIoMkdir(path, 0777); 
 
     char fname[128];
-	sprintf(fname, "%s/%s.%s", path, name, ext);
+	snprintf(fname, sizeof(fname), "%s/%s.%s", path, name, ext);
 	SceUID fd = ksceIoOpen(fname, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
 	if (fd < 0)
 		return false;
@@ -69,7 +75,7 @@ bool fio_writeFile(char* buff, int size, char* path, char* name, char* ext){
 }
 bool fio_deleteFile(char* path, char* name, char* ext){
 	char fname[128];
-	sprintf(fname, "%s/%s.%s", path, name, ext);
+	snprintf(fname, sizeof(fname), "%s/%s.%s", path, name, ext);
 	if (ksceIoRemove(fname) >= 0)
 		return true;
 	return false;
@@ -78,7 +84,8 @@ int fio_delete(char* path){
 	return ksceIoRemove(path);
 }
 
-int fio_copyFile(char *src, char *dest){
+// Copies one file through the caller-provided transfer buffer.
+static int copyFile(char *src, char *dest, char *buff, int buffSize){
 	int ret = 0;
 
 	// Check if blacklisted
@@ -86,13 +93,6 @@ int fio_copyFile(char *src, char *dest){
 			|| isBlacklisted(src) 
 			|| isBlacklisted(dest))
 		return ERROR_BLACKLISTED;
-
-	// The destination is a subfolder of the source folder
-	int len = strlen(src);
-	if (strcmp(src, dest) == 0 
-			&& (dest[len] == '/' || dest[len - 1] == '/')){
-		return ERROR_SUBFOLDER;
-	}
 
 	// Open both files
 	SceUID fdsrc = ksceIoOpen(src, SCE_O_RDONLY, 0);
@@ -105,22 +105,12 @@ int fio_copyFile(char *src, char *dest){
 		return fddst;
 	}
 
-	//Mem allocation for buffer
-	char* buff;
-	SceUID buff_uid  = ksceKernelAllocMemBlock("RemaPSV2_filecopy", 
-		SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RW, (TRANSFER_SIZE + 0xfff) & ~0xfff, NULL);
-	if (buff_uid < 0){
-		ret = buff_uid;
-		goto ERROR_IO;
-	}
-    ksceKernelGetMemBlockBase(buff_uid, (void**)&buff);
-
 	// Copy file using buffer
 	while (true){
-		int read = ksceIoRead(fdsrc, buff, TRANSFER_SIZE);
+		int read = ksceIoRead(fdsrc, buff, buffSize);
 		if (read < 0){
 			ret = read;
-			goto ERROR;
+			break;
 		}
 		if (read == 0)
 			break;
@@ -128,36 +118,39 @@ int fio_copyFile(char *src, char *dest){
 		int written = ksceIoWrite(fddst, buff, read);
 		if (written < 0){
 			ret = written;
-			goto ERROR;
+			break;
+		}
+		if (written != read){
+			ret = ERROR_SHORT_WRITE;
+			break;
 		}
 	}
 
 	// Inherit file stat
-	SceIoStat stat;
-	memset(&stat, 0, sizeof(SceIoStat));
-	ksceIoGetstatByFd(fdsrc, &stat);
-	ksceIoChstatByFd(fddst, &stat, 0x3B);
+	if (ret >= 0){
+		SceIoStat stat;
+		memset(&stat, 0, sizeof(SceIoStat));
+		ksceIoGetstatByFd(fdsrc, &stat);
+		ksceIoChstatByFd(fddst, &stat, 0x3B);
+	}
 
-ERROR_IO:
 	// Close / Clean IO
 	ksceIoClose(fddst);
 	ksceIoClose(fdsrc);
 	if (ret < 0)
 		ksceIoRemove(dest);
 
-ERROR: 
-	// Free allocated memory
-	ksceKernelFreeMemBlock(buff_uid);
-
     return ret;
 }
 
-int fio_copyDir(char *src, char *dest) {
+static int copyDir(char *src, char *dest, char *buff, int buffSize) {
     if (strcmp(src, dest) == 0 
 			|| isBlacklisted(src) 
 			|| isBlacklisted(dest))
 		return 0;
     SceUID dfd = ksceIoDopen(src);
+	if (dfd < 0)
+		return dfd;
 
     if (!fio_exist(dest)) {
         int ret = ksceIoMkdir(dest, 0777);
@@ -179,17 +172,17 @@ int fio_copyDir(char *src, char *dest) {
                 continue;
 
             char new_src[strlen(src) + strlen(dir.d_name) + 2];
-            snprintf(new_src, 1024, "%s/%s", src, dir.d_name);
+            snprintf(new_src, sizeof(new_src), "%s/%s", src, dir.d_name);
 
             char new_dest[strlen(dest) + strlen(dir.d_name) + 2];
-            snprintf(new_dest, 1024, "%s/%s", dest, dir.d_name);
+            snprintf(new_dest, sizeof(new_dest), "%s/%s", dest, dir.d_name);
 
             int ret = 0;
 
             if (SCE_S_ISDIR(dir.d_stat.st_mode)) {
-                ret = fio_copyDir(new_src, new_dest);
+                ret = copyDir(new_src, new_dest, buff, buffSize);
             } else {
-                ret = fio_copyFile(new_src, new_dest);
+                ret = copyFile(new_src, new_dest, buff, buffSize);
             }
 
             if (ret < 0 && ret != ERROR_BLACKLISTED) {
@@ -201,6 +194,30 @@ int fio_copyDir(char *src, char *dest) {
 
     ksceIoDclose(dfd);
     return 0;
+}
+
+// Allocates the transfer buffer once, runs fn, frees it.
+static int withTransferBuffer(char *src, char *dest, int (*fn)(char*, char*, char*, int)){
+	char* buff = NULL;
+	SceUID buff_uid = ksceKernelAllocMemBlock("reVita_filecopy", 
+		SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RW, TRANSFER_SIZE, NULL);
+	if (buff_uid < 0)
+		return buff_uid;
+	if (ksceKernelGetMemBlockBase(buff_uid, (void**)&buff) != 0 || buff == NULL){
+		ksceKernelFreeMemBlock(buff_uid);
+		return -1;
+	}
+	int ret = fn(src, dest, buff, TRANSFER_SIZE);
+	ksceKernelFreeMemBlock(buff_uid);
+	return ret;
+}
+
+int fio_copyFile(char *src, char *dest){
+	return withTransferBuffer(src, dest, copyFile);
+}
+
+int fio_copyDir(char *src, char *dest) {
+	return withTransferBuffer(src, dest, copyDir);
 }
 
 int fio_deletePath(const char *path){

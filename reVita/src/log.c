@@ -4,6 +4,10 @@
 #include "log.h"
 
 int prefixFlag = 1;
+
+#ifdef LOG_DISC
+// 16 KB buffer for the on-disc log; only compiled in when LOG_DISC is defined,
+// otherwise it would sit unused in the kernel module .bss forever.
 static uint log_buf_ptr = 0;
 static char log_buf[16 * 1024];
 
@@ -40,3 +44,4 @@ void log_flush(){
 	memset(log_buf, 0, sizeof(log_buf));
 	log_buf_ptr = 0;
 }
+#endif /* LOG_DISC */

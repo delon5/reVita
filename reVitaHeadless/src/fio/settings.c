@@ -10,7 +10,7 @@
 #include "ini.h"
 
 #define SECTION "SETTINGS"
-#define BUFFER_SIZE_SETTINGS (200 * sizeof(char)+ 0xfff) & ~0xfff
+#define BUFFER_SIZE_SETTINGS 4096
 #define PATH "ur0:/data/reVita"
 #define NAME_SETTINGS "SETTINGS"
 #define EXT "INI"
@@ -39,7 +39,7 @@ void settings_resetAllPopups(){
 }
 
 bool generateINISettings(char* buff){
-	INI _ini = ini_create(buff, 99);
+	INI _ini = ini_create(buff, BUFFER_SIZE_SETTINGS);
 	INI* ini = &_ini;
 
 	ini_addSection(ini, SECTION);
@@ -67,7 +67,7 @@ bool generateINISettings(char* buff){
 			default: break;
 		}
 	}
-	return true;
+	return ini_ok(ini);
 }
 
 bool parseINISettings(char* buff){

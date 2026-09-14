@@ -178,7 +178,7 @@ void changeActiveApp(char* tId, int pid){
 
 static void updatePspemuTitle() {
     char id[12];
-    if (ksceKernelMemcpyUserToKernelForPid(processid, &id[0], (uintptr_t)0x73CDE000 + 0x98, sizeof(id)) != 0)
+    if (ksceKernelMemcpyUserToKernelForPid(processid, &id[0], (const void*)(0x73CDE000 + 0x98), sizeof(id)) != 0)
         return;
 
     if (streq(id, ""))
@@ -193,7 +193,7 @@ int nullButtons_user(SceCtrlData *bufs, SceUInt32 nBufs, bool isPositiveLogic){
     scd.buttons = isPositiveLogic ? 0 : 0xFFFFFFFF;
     scd.lx = scd.ly = scd.rx = scd.ry = 127;
     for (int i = 0; i < nBufs; i++)
-        ksceKernelMemcpyKernelToUser((uintptr_t)&bufs[i], &scd, sizeof(SceCtrlData));
+        ksceKernelMemcpyKernelToUser((void*)&bufs[i], &scd, sizeof(SceCtrlData));
     return nBufs;
 }
 
@@ -256,15 +256,15 @@ int onInput(int port, SceCtrlData *ctrl, int nBufs, int isKernelSpace, int isPos
     } else {
         // Update internal cache with latest buffers
         SceCtrlData scd;
-        ksceKernelMemcpyUserToKernel(&scd, (uintptr_t)&ctrl[ret-1], sizeof(SceCtrlData));
+        ksceKernelMemcpyUserToKernel(&scd, (void*)&ctrl[ret-1], sizeof(SceCtrlData));
         remap_ctrl_updateBuffers(port, &scd, isPositiveLogic, isExt);
 
         // Replace returned buffers with those from internal cache
         ret = min(ret, remap_ctrl_getBufferNum(port));
         for (int i = 0; i < ret; i++){
-            ksceKernelMemcpyUserToKernel(&scd, (uintptr_t)&ctrl[i], sizeof(SceCtrlData));
+            ksceKernelMemcpyUserToKernel(&scd, (void*)&ctrl[i], sizeof(SceCtrlData));
             remap_ctrl_readBuffer(port, &scd, ret - i, isPositiveLogic, isExt);
-            ksceKernelMemcpyKernelToUser((uintptr_t)&ctrl[i], &scd, sizeof(SceCtrlData)); 
+            ksceKernelMemcpyKernelToUser((void*)&ctrl[i], &scd, sizeof(SceCtrlData)); 
         }
     }
     ksceKernelUnlockMutex(mutexCtrlHook[port], 1);
@@ -308,7 +308,7 @@ int nullTouch_kernel(SceTouchData *pData, SceUInt32 nBufs){
 
 int nullTouch_user(SceTouchData *pData, SceUInt32 nBufs){
     SceUInt32 reportsNum = 0;
-    ksceKernelMemcpyKernelToUser((uintptr_t)&pData[0].reportNum, &reportsNum, sizeof(SceUInt32));
+    ksceKernelMemcpyKernelToUser((void*)&pData[0].reportNum, &reportsNum, sizeof(SceUInt32));
     return 1;
 }
 
@@ -339,13 +339,13 @@ int onTouch(SceUInt32 port, SceTouchData *pData, SceUInt32 nBufs, uint8_t hookId
         }
     } else {
         SceTouchData std;                // Last buffer
-        ksceKernelMemcpyUserToKernel(&std, (uintptr_t)&pData[ret-1], sizeof(SceTouchData));
+        ksceKernelMemcpyUserToKernel(&std, (void*)&pData[ret-1], sizeof(SceTouchData));
         if (hookIdx < 2){   // Touch
             ret = remap_touch(port, &std, nBufs, hookIdx, &remappedBuffers);
-            ksceKernelMemcpyKernelToUser((uintptr_t)&pData[0], remappedBuffers, ret * sizeof(SceTouchData)); 
+            ksceKernelMemcpyKernelToUser((void*)&pData[0], remappedBuffers, ret * sizeof(SceTouchData)); 
         } else {            // Touch region
             ret = remap_touchRegion(port, &pData[nBufs - 1], nBufs, hookIdx);
-            ksceKernelMemcpyKernelToUser((uintptr_t)&pData[0], &std, ret * sizeof(SceTouchData)); 
+            ksceKernelMemcpyKernelToUser((void*)&pData[0], &std, ret * sizeof(SceTouchData)); 
         }
     }
     ksceKernelUnlockMutex(mutexTouchHook[port], 1);

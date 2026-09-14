@@ -14,9 +14,8 @@
 #include "sysactions.h"
 #include "log.h"
 
-#define CACHE_CTRL_SIZE (sizeof(SceCtrlData) * BUFFERS_NUM * PORTS_NUM * PROC_NUM)
-#define CACHE_TOUCH_SIZE (sizeof(SceTouchData) * BUFFERS_NUM * TOUCH_HOOKS_NUM * SCE_TOUCH_PORT_MAX_NUM)
-#define MEM_SIZE ((0xfff + CACHE_CTRL_SIZE + CACHE_TOUCH_SIZE) & ~0xfff)
+// Only ksceTouchPeek/Read (hook ids 0 and 1) are buffered; the Region variants are not
+#define TOUCH_CACHE_HOOKS_NUM 2
 
 #define POS  1
 #define NEG -1
@@ -72,12 +71,15 @@ const uint32_t HW_BUTTONS[HW_BUTTONS_NUM] = {
 	SCE_CTRL_TOUCHPAD, SCE_CTRL_MIC, SCE_CTRL_HEADPHONE
 };
 
-SceUID remap_memId;
-uint8_t* remap_memBase;
+// Storage for the remapped input history. Static so that it is part of the
+// module image (no runtime allocation that could fail): 32*16*5*2 = 5120 B for
+// controls plus 144*16*2*2 = 9216 B for touch.
+static SceCtrlData  ctrlBuf[PORTS_NUM][PROC_NUM][CACHE_BUFS];
+static SceTouchData touchBuf[TOUCH_CACHE_HOOKS_NUM][SCE_TOUCH_PORT_MAX_NUM][CACHE_BUFS];
 
 // Caches to store remapped buffers per each hook and port
 static struct CtrlCache cacheCtrl[PORTS_NUM][PROC_NUM];
-static struct TouchCache cacheTouch[TOUCH_HOOKS_NUM][SCE_TOUCH_PORT_MAX_NUM];
+static struct TouchCache cacheTouch[TOUCH_CACHE_HOOKS_NUM][SCE_TOUCH_PORT_MAX_NUM];
 
 bool newEmulatedTouchBuffer[TOUCH_HOOKS_NUM][SCE_TOUCH_PORT_MAX_NUM];
 
@@ -138,6 +140,8 @@ void storeTouchPoint(EmulatedTouch *et, TouchPoint tp, int port, int ruleIdx){
 	for (int i = 0; i < et->num; i++)
 		if (et->reports[i].point.x == tp.x && et->reports[i].point.y == tp.y)
 			return;
+	if (et->num >= SIZE(et->reports))
+		return;
 	et->reports[et->num].point.x = tp.x;
 	et->reports[et->num].point.y = tp.y;
 	et->reports[et->num].isSwipe = false;
@@ -154,6 +158,8 @@ void storeTouchSwipe(EmulatedTouch *et, TouchPoints2 tps, int port, int ruleIdx)
 				et->reports[i].point.x == tps.a.x && et->reports[i].point.y == tps.a.y && 
 				et->reports[i].swipeEndPoint.x == tps.b.x && et->reports[i].swipeEndPoint.y == tps.b.y)
 			return;
+	if (et->num >= SIZE(et->reports))
+		return;
 	et->reports[et->num].point.x = tps.a.x;
 	et->reports[et->num].point.y = tps.a.y;
 	et->reports[et->num].swipeEndPoint.x = tps.b.x;
@@ -173,6 +179,8 @@ EmulatedTouchEvent* storeTouchSmartSwipe(EmulatedTouch *et, TouchPoint tp, int p
 		if (et->reports[i].isSmartSwipe == true &&
 				et->reports[i].point.x == tp.x && et->reports[i].point.y == tp.y)
 			return &et->reports[i];
+	if (et->num >= SIZE(et->reports))
+		return NULL;
 	EmulatedTouchEvent* ete = &et->reports[et->num];
 	ete->point.x = tp.x;
 	ete->point.y = tp.y;
@@ -283,6 +291,7 @@ void addEmu(RuleData* rd) {
 					break;
 				case REMAP_TOUCH_SWIPE_SMART_DPAD:  
 					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx);
+					if (ete == NULL) break;
 					if (btn_has(rd->btns, SCE_CTRL_LEFT)) 
 						ete->swipeEndPoint.x = clamp(
 							ete->swipeEndPoint.x - profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
@@ -312,6 +321,7 @@ void addEmu(RuleData* rd) {
 					break;
 				case REMAP_TOUCH_SWIPE_SMART_L:  
 					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx);
+					if (ete == NULL) break;
 					if (abs(127 - rd->ctrl->lx) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
 						ete->swipeEndPoint.x = clamp(
 							ete->swipeEndPoint.x + 
@@ -328,7 +338,8 @@ void addEmu(RuleData* rd) {
 								rd->analogLeftProp.up = rd->analogLeftProp.down = 0;
 					break;
 				case REMAP_TOUCH_SWIPE_SMART_R:  
-					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx); 
+					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx);
+					if (ete == NULL) break; 
 					if (abs(127 - rd->ctrl->rx) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
 						ete->swipeEndPoint.x = clamp(
 							ete->swipeEndPoint.x + 
@@ -361,8 +372,8 @@ void addEmu(RuleData* rd) {
 				case REMAP_SYS_KILL: 			sysactions_killCurrentApp(); break;
 				case REMAP_SYS_BRIGHTNESS_INC: 	sysactions_brightnessInc(); break;
 				case REMAP_SYS_BRIGHTNESS_DEC: 	sysactions_brightnessDec(); break;
-				case REMAP_SYS_SAVE_BACKUP: 	sysactions_saveRestore(); break;
-				case REMAP_SYS_SAVE_RESTORE: 	sysactions_saveBackup(); break;
+				case REMAP_SYS_SAVE_BACKUP: 	sysactions_saveBackup(); break;
+				case REMAP_SYS_SAVE_RESTORE: 	sysactions_saveRestore(); break;
 				case REMAP_SYS_SAVE_DELETE: 	sysactions_saveDelete(); break;
 				case REMAP_SYS_CALIBRATE_MOTION:sysactions_calibrateMotion(); break;
 				case REMAP_SYS_TOGGLE_SECONDARY:sysactions_toggleSecondary(); break;
@@ -934,11 +945,11 @@ void remap_ctrl_updateBuffers(int port, SceCtrlData *ctrl, bool isPositiveLogic,
 		return;
 	}
 
-	// If buffer full - remove latest entry
-	if (cacheCtrl[port][isShell].num >= BUFFERS_NUM){
-		for (int i = 1; i < BUFFERS_NUM; i++)
-			cacheCtrl[port][isShell].buffers[i - 1] = cacheCtrl[port][isShell].buffers[i];
-		cacheCtrl[port][isShell].num--;
+	// If buffer full - drop the oldest entry
+	if (cacheCtrl[port][isShell].num >= CACHE_BUFS){
+		memmove(&cacheCtrl[port][isShell].buffers[0], &cacheCtrl[port][isShell].buffers[1],
+			(CACHE_BUFS - 1) * sizeof(SceCtrlData));
+		cacheCtrl[port][isShell].num = CACHE_BUFS - 1;
 	}
 
 	// Add curr ctrl to buffer
@@ -1106,31 +1117,37 @@ void updateTouchInfo(SceUInt32 port, int hookId, SceTouchData *pData){
 
 int remap_touch(SceUInt32 port, SceTouchData *pData, SceUInt32 nBufs, uint8_t hookId, 
 		SceTouchData **remappedBuffers){
+	if (hookId >= TOUCH_CACHE_HOOKS_NUM || port >= SCE_TOUCH_PORT_MAX_NUM){ // Not a buffered hook
+		*remappedBuffers = pData;
+		return 1;
+	}
+	TouchCache* cache = &cacheTouch[hookId][port];
+
 	// If buffer for timestamp is already remapped
-	if (pData->timeStamp == cacheTouch[hookId][port].buffers[cacheTouch[hookId][port].num - 1].timeStamp){
-		*remappedBuffers = &cacheTouch[hookId][port].buffers[cacheTouch[hookId][port].num - nBufs];
+	if (cache->num > 0 && pData->timeStamp == cache->buffers[cache->num - 1].timeStamp){
+		nBufs = min(nBufs, cache->num);
+		*remappedBuffers = &cache->buffers[cache->num - nBufs];
 		return nBufs;
 	}
 
-	// If buffer full - remove latest entry
-	if (cacheTouch[hookId][port].num >= BUFFERS_NUM){
-		for (int i = 1; i < BUFFERS_NUM; i++)
-			cacheTouch[hookId][port].buffers[i - 1] = cacheTouch[hookId][port].buffers[i];
-		cacheTouch[hookId][port].num--;
+	// If buffer full - drop the oldest entry
+	if (cache->num >= CACHE_BUFS){
+		memmove(&cache->buffers[0], &cache->buffers[1], (CACHE_BUFS - 1) * sizeof(SceTouchData));
+		cache->num = CACHE_BUFS - 1;
 	}
 	
 	// Add curr buffer to cache
-	int idx = cacheTouch[hookId][port].num;
-	cacheTouch[hookId][port].num++;
-	cacheTouch[hookId][port].buffers[idx] = pData[0];
+	int idx = cache->num;
+	cache->num++;
+	cache->buffers[idx] = pData[0];
 	
 	// Updating latest buffer with simulated touches
-	updateTouchInfo(port, hookId, &cacheTouch[hookId][port].buffers[idx]);
+	updateTouchInfo(port, hookId, &cache->buffers[idx]);
 	
-	// Limit returned buufers num with what we have stored
-	nBufs = min(nBufs, cacheTouch[hookId][port].num);
+	// Limit returned buffers num with what we have stored
+	nBufs = min(nBufs, cache->num);
 
-	*remappedBuffers = &cacheTouch[hookId][port].buffers[idx + 1 - nBufs];
+	*remappedBuffers = &cache->buffers[idx + 1 - nBufs];
 	return nBufs;
 }
 
@@ -1151,7 +1168,7 @@ void remap_resetBuffers(){
 		}
 	}
 	for (int i = 0; i < SCE_TOUCH_PORT_MAX_NUM; i++){
-		for (int j = 0; j < TOUCH_HOOKS_NUM; j++){
+		for (int j = 0; j < TOUCH_CACHE_HOOKS_NUM; j++){
 			cacheTouch[j][i].num = 0;
 		}
 		et[i].num = 0;
@@ -1278,22 +1295,15 @@ void remap_setup(){
 }
 
 void remap_init(){
-	//Allocating mem for stored buffers
-	remap_memId = ksceKernelAllocMemBlock("remapsv2_bufs_remap", 
-        SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RW, MEM_SIZE, NULL);
-    ksceKernelGetMemBlockBase(remap_memId, (void**)&remap_memBase);
-    LOG("MEMORY ALLOC remap cacheCtrl %i\n", CACHE_CTRL_SIZE);
-    LOG("MEMORY ALLOC remap cacheTouch %i\n", CACHE_TOUCH_SIZE);
+	// Point the caches at their static storage (no runtime allocation)
 	for (int i = 0; i < PORTS_NUM; i++){
 		for (int j = 0; j < PROC_NUM; j++){
-			cacheCtrl[i][j].buffers = (SceCtrlData*)(remap_memBase + 
-				sizeof(SceCtrlData) * BUFFERS_NUM * (i * PROC_NUM + j));
+			cacheCtrl[i][j].buffers = ctrlBuf[i][j];
 		}
 	}
-	for (int i = 0; i < TOUCH_HOOKS_NUM; i++){
+	for (int i = 0; i < TOUCH_CACHE_HOOKS_NUM; i++){
     	for (int j = 0; j < SCE_TOUCH_PORT_MAX_NUM; j++){
-			cacheTouch[i][j].buffers = (SceTouchData*)(remap_memBase + CACHE_CTRL_SIZE + 
-				sizeof(SceTouchData) * BUFFERS_NUM * (i * SCE_TOUCH_PORT_MAX_NUM + j));
+			cacheTouch[i][j].buffers = touchBuf[i][j];
 		}
 	}
 	
@@ -1313,6 +1323,4 @@ void remap_init(){
 }
 
 void remap_destroy(){
-    //Free mem
-	ksceKernelFreeMemBlock(remap_memId);
 }

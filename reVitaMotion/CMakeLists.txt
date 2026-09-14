@@ -13,6 +13,10 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O3 -std=gnu99 -DTAIPOOL_AS_STDLIB")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fno-rtti -fno-exceptions")
+# Reserve room after the text segment for the SCE module info that vita-elf-create
+# appends; without it the link can pack the segments too tightly (vita-elf-create:
+# "Cannot allocate ... bytes for SCE data at end of segment 0").
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--defsym=__sce_headroom=0x1000")
 
 include_directories(
 )
