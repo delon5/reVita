@@ -1,4 +1,4 @@
-# reVita v.1.0 | [Wiki](../../wiki) | [PS TV Configs](https://github.com/DerpyBubblez/reVita-Configs)
+# reVita v.1.2.1 | [Wiki](../../wiki) | [PS TV Configs](https://github.com/DerpyBubblez/reVita-Configs)
 **reVita** is a plugin for PS Vita / PS TV, which allows you to remap inputs and trigger different actions. It is a continuation of [Rinnegatamante](https://github.com/Rinnegatamante)'s **[remaPSV](https://github.com/Rinnegatamante/remaPSV)**, which was fully rewritten as a kernel plugin.
 
 [Here](https://github.com/DerpyBubblez/reVita-Configs) you can find ready to use [PS TV Configs](https://github.com/DerpyBubblez/reVita-Configs) by [Derpy](https://github.com/DerpyBubblez)
@@ -120,7 +120,7 @@ Want to use DS3 / DS4 ? Check this page [here](../../wiki/External-Controllers) 
   - Save it as Shared profile (Profile > Profile management > Save as Shared)
   - Go back to the game
   - Press **START**+**CROSS**(configurable under Settings > Hotkeys) to import Shared profile.
-- "Buy more RAM" error popup on menu open (versions up to 1.1.2) - the menu used to allocate a 512 KB kernel buffer every time it opened, which failed when other heavy kernel plugins (ucdc, PSVShell) had used up the kernel memory. Since 1.2.0 the menu draws into a small static buffer, so the popup no longer exists; update reVita.
+- "Buy more RAM" error popup on menu open (versions up to 1.1.2) - the menu used to allocate a 512 KB kernel buffer every time it opened, which failed when other heavy kernel plugins (ucdc, PSVShell) had used up the kernel memory. Since 1.2.1 the menu draws into a small static buffer, so the popup no longer exists; update reVita.
 - Crash, when closing the menu
   - update reVita and ds34vita to latest versions (from github) 
 ## Build
