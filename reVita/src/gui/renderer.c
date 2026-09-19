@@ -195,10 +195,12 @@ void renderer_setFB(const SceDisplayFrameBuf *param){
 }
 
 void renderer_writeFromVFB(int64_t tickOpened, bool anim){
+	if (fb_base == NULL || fbWidth < uiWidth || fbHeight < uiHeight)
+		return;	// framebuffer cannot hold the menu (and unsigned maths below would wrap)
 	int64_t tick = ksceKernelGetSystemTimeWide();
 
-	uint32_t ui_x = (max(fbWidth - uiWidth, 0)) / 2;
-	uint32_t ui_y = (max(fbHeight - uiHeight, 0)) / 2;
+	uint32_t ui_x = (fbWidth - uiWidth) / 2;
+	uint32_t ui_y = (fbHeight - uiHeight) / 2;
 
 	float multiplyer = 0;
 	if (ANIMATION_TIME >= tick - tickOpened && anim)

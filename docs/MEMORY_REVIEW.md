@@ -10,9 +10,9 @@ Built with VitaSDK 2026.08 (GCC 15.2), `arm-vita-eabi-size` of the kernel module
 | | text | data | bss | image total | runtime memblocks | kernel RAM, menu closed | kernel RAM, menu open |
 |---|---|---|---|---|---|---|---|
 | Before (`01a872e`, -O3) | 135400 | 12924 | 35128 | 183452 | 94208 always + 524288 while the menu is open | 277660 | 801948 |
-| After (this branch, -Os) | 79540 | 12908 | 100240 | 192688 | none (transient only: 12288 or 4096 for an INI load/save, 32768 during a save backup) | 192688 | 192688 |
+| After (this branch, -Os) | 79696 | 12908 | 143248 | 235852 | none (transient only: 12288 or 4096 for an INI load/save, 32768 during a save backup) | 235852 | 235852 |
 
-Steady state drops by 84972 B (31 %); the menu-open peak drops by 609260 B (76 %), and nothing is
+Steady state drops by 41808 B (15 %); the menu-open peak drops by 566096 B (71 %), and nothing is
 allocated when the menu opens, so the "Buy more RAM !" popup no longer exists.
 
 What changed (all in `reVita/src`, mirrored into `reVitaHeadless/src` where the file exists there):
@@ -21,10 +21,12 @@ What changed (all in `reVita/src`, mirrored into `reVitaHeadless/src` where the 
    buffer (480 x 272 / 2 = 65280 B of .bss) instead of a 512 KB memblock per menu open. Every colour drawn into
    it is a `theme[]` entry, so the buffer is lossless; rows are expanded to 32-bit ARGB through a 1920 B line
    buffer inside the existing per-row copy. Drawing primitives clip instead of wrapping; `gui_open()` cannot fail.
-2. **Remap input cache** (`remap.[ch]`): static arrays, 16 samples deep (was 64) and only the two hooks that are
-   actually buffered (was 4): 14336 B of .bss instead of a permanent 94208 B memblock. `BUFFERS_NUM` (64) still
-   guards "caller asked for more than we handle". `remap_touch` clamps before pointer arithmetic and guards an
-   empty cache.
+2. **Remap input cache** (`remap.[ch]`): static arrays instead of a permanent 94208 B memblock, and only for the
+   two hooks that are actually buffered (the Region hooks never used their half): 57344 B of .bss. The history
+   depth stays at 64 so that apps asking for up to 64 buffers get exactly what they got before (a 16-deep cache was
+   tried and rejected in review for that reason). `remap_touch` clamps before pointer arithmetic and guards an empty
+   cache; `remap_ctrl_readBuffer` no longer rejects the oldest cached entry (an off-by-one that left the first
+   sample after a reset un-remapped).
 3. **Dead 16 KB log buffer** (`log.c`): compiled only with `LOG_DISC`.
 4. **Font and icon tables** (`gui/img/*`): defined once in `font-data.c` / `icons-font-data.c` instead of twice
    (they were `static const` in headers included by both renderers): 17920 B of rodata.
@@ -32,9 +34,12 @@ What changed (all in `reVita/src`, mirrored into `reVitaHeadless/src` where the 
    on the otherwise identical tree. `--gc-sections` was tried and rejected: it discards the exported syscall
    functions and `module_stop`, and `vita-elf-create` then fails.
 6. **Kernel memory-safety fixes** found by the review: bounded INI writer with an overflow flag and a 12288 B
-   profile buffer (worst case 10944 B), so saving a profile with many rules refuses instead of overflowing kernel
-   memory and shows "Profile NOT saved"; `sscanf` widths that match the destination buffers; `fio_readFile`
-   NUL-terminates; rule index range check; the action-name table completed (it was one entry short and
+   profile buffer (worst case about 11.4 KB), so a profile can never overflow kernel memory again (the writer
+   formats into a scratch buffer first, because libk's PDCLib `vsnprintf` does not bound literal format
+   characters); a failed save shows "Profile NOT saved"; `ini_nextEntry` no longer recurses once per section line
+   (a file of a few dozen consecutive section lines overflowed the kernel stack); `parseBGR` no longer reads past an
+   empty theme value; `fio_writeFile` checks the write result; `sscanf` widths that match the destination buffers;
+   `fio_readFile` NUL-terminates; rule index range check; the action-name table completed (it was one entry short and
    `strcmp(NULL, ...)` was reachable from a typo in a profile file); emulated-touch report capacity check; file copy
    cleanup paths fixed and one 32 KB transfer buffer per copied tree instead of 128 KB per file; the swapped
    "savegame backup" / "savegame restore" remap actions; `menu-debug-buttons.c` drawing with the wrong renderer.
@@ -42,6 +47,11 @@ What changed (all in `reVita/src`, mirrored into `reVitaHeadless/src` where the 
    `-Wl,--defsym=__sce_headroom=0x1000` so the linker leaves room after the text segment for the SCE module info
    (`reVitaHeadless` did not link without it, `reVita` only linked by size coincidence); verbose logging is an
    opt-in CMake option (`-DREVITA_LOG_DEBUG=ON`) instead of always on for root builds.
+
+Visible side effect to be aware of: popup backgrounds and the "clear screen" blank frame are now drawn with
+the intended colour (opaque black or the theme background). The old code filled them with `memset()` of the low
+byte of the colour, which produced alpha 0 black for the dark theme; on the SceShell overlay plane that used to
+show as transparent.
 
 Not done (deliberately): shrinking the three `Profile` copies or `MenuEntry` (under 4 KB, and the `Profile` layout
 is exported to `reVitaMotion`); dirty-frame tracking and row-buffered popup drawing (CPU only, no RAM).

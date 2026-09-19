@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 #define BUFFERS_NUM             64	// max buffers a caller may request (SceCtrl API limit); larger requests bypass remapping
-#define CACHE_BUFS              16	// remapped history kept per port / process / touch hook
+#define CACHE_BUFS              BUFFERS_NUM	// remapped history kept per port / process / touch hook (callers may ask for up to 64)
 #define PORTS_NUM               5
 #define PROC_NUM                2
 #define MULTITOUCH_FRONT_NUM    6

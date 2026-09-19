@@ -518,7 +518,7 @@ void gui_close(){
 			snprintf(profile_to_save, sizeof(profile_to_save), isSecondaryProfileLoaded ? "%s%s" : "%s", titleid, SECONDARY_PROFILE_SUFFIX);
 			
 			if (!profile_save(profile_to_save)){
-				gui_popupShowDanger("$! Profile NOT saved", "too many rules for INI", TTL_POPUP_LONG);
+				gui_popupShowDanger("$! Profile NOT saved", "cannot write ur0:data/reVita/Profile", TTL_POPUP_LONG);
 			} else if (settings[POP_SAVE].v.b) {
 				char pop_message[64];
 				snprintf(pop_message, sizeof(pop_message), isSecondaryProfileLoaded ? "%s (secondary)" : "%s", titleid);

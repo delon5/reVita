@@ -14,8 +14,9 @@
 #define NAME_SHARED "SHARED"
 #define NAME_HOME "HOME"
 #define EXT_INI "INI"
-// Worst-case INI for a profile (43 entries + 25 rules listing every button)
-// is 10944 bytes, so three pages.
+// Worst-case INI for a profile (43 entries with the longest printable values,
+// a 31-char name and 25 rules whose trigger and emu both list all 23 buttons)
+// is about 11.4 KB, so three pages.
 #define BUFFER_SIZE 12288
 
 enum PROF_ID profile_findIdByKey(char* n){

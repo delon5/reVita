@@ -72,8 +72,9 @@ const uint32_t HW_BUTTONS[HW_BUTTONS_NUM] = {
 };
 
 // Storage for the remapped input history. Static so that it is part of the
-// module image (no runtime allocation that could fail): 32*16*5*2 = 5120 B for
-// controls plus 144*16*2*2 = 9216 B for touch.
+// module image (no runtime allocation that could fail): 32*64*5*2 = 20480 B for
+// controls plus 144*64*2*2 = 36864 B for touch (the Region hooks were never
+// cached, so their half of the old block is gone).
 static SceCtrlData  ctrlBuf[PORTS_NUM][PROC_NUM][CACHE_BUFS];
 static SceTouchData touchBuf[TOUCH_CACHE_HOOKS_NUM][SCE_TOUCH_PORT_MAX_NUM][CACHE_BUFS];
 
@@ -291,27 +292,28 @@ void addEmu(RuleData* rd) {
 					break;
 				case REMAP_TOUCH_SWIPE_SMART_DPAD:  
 					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx);
-					if (ete == NULL) break;
-					if (btn_has(rd->btns, SCE_CTRL_LEFT)) 
-						ete->swipeEndPoint.x = clamp(
-							ete->swipeEndPoint.x - profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
-							T_SIZE[port].a.x, 
-							T_SIZE[port].b.x);
-					if (btn_has(rd->btns, SCE_CTRL_RIGHT)) 
-						ete->swipeEndPoint.x = clamp(
-							ete->swipeEndPoint.x + profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
-							T_SIZE[port].a.x, 
-							T_SIZE[port].b.x);
-					if (btn_has(rd->btns, SCE_CTRL_UP)) 
-						ete->swipeEndPoint.y = clamp(
-							ete->swipeEndPoint.y - profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
-							T_SIZE[port].a.y, 
-							T_SIZE[port].b.y);
-					if (btn_has(rd->btns, SCE_CTRL_DOWN)) 
-						ete->swipeEndPoint.y = clamp(
-							ete->swipeEndPoint.y + profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
-							T_SIZE[port].a.y, 
-							T_SIZE[port].b.y);
+					if (ete != NULL){	// NULL: report table full, still consume the trigger below
+						if (btn_has(rd->btns, SCE_CTRL_LEFT)) 
+							ete->swipeEndPoint.x = clamp(
+								ete->swipeEndPoint.x - profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
+								T_SIZE[port].a.x, 
+								T_SIZE[port].b.x);
+						if (btn_has(rd->btns, SCE_CTRL_RIGHT)) 
+							ete->swipeEndPoint.x = clamp(
+								ete->swipeEndPoint.x + profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
+								T_SIZE[port].a.x, 
+								T_SIZE[port].b.x);
+						if (btn_has(rd->btns, SCE_CTRL_UP)) 
+							ete->swipeEndPoint.y = clamp(
+								ete->swipeEndPoint.y - profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
+								T_SIZE[port].a.y, 
+								T_SIZE[port].b.y);
+						if (btn_has(rd->btns, SCE_CTRL_DOWN)) 
+							ete->swipeEndPoint.y = clamp(
+								ete->swipeEndPoint.y + profile.entries[PR_TO_SWIPE_SMART_SENS].v.u,
+								T_SIZE[port].a.y, 
+								T_SIZE[port].b.y);
+					}
 					if (!rd->rr->propagate){
 						btn_del(&rd->btnsProp, SCE_CTRL_LEFT);
 						btn_del(&rd->btnsProp, SCE_CTRL_RIGHT);
@@ -321,37 +323,39 @@ void addEmu(RuleData* rd) {
 					break;
 				case REMAP_TOUCH_SWIPE_SMART_L:  
 					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx);
-					if (ete == NULL) break;
-					if (abs(127 - rd->ctrl->lx) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
-						ete->swipeEndPoint.x = clamp(
-							ete->swipeEndPoint.x + 
-								((float)(rd->ctrl->lx - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
-							T_SIZE[port].a.x, 
-							T_SIZE[port].b.x);
-					if (abs(127 - rd->ctrl->ly) > profile.entries[PR_AN_LEFT_DEADZONE_Y].v.u)
-						ete->swipeEndPoint.y = clamp(ete->swipeEndPoint.y + 
-							((float)(rd->ctrl->ly - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
-							T_SIZE[port].a.y, 
-							T_SIZE[port].b.y);
+					if (ete != NULL){
+						if (abs(127 - rd->ctrl->lx) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
+							ete->swipeEndPoint.x = clamp(
+								ete->swipeEndPoint.x + 
+									((float)(rd->ctrl->lx - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
+								T_SIZE[port].a.x, 
+								T_SIZE[port].b.x);
+						if (abs(127 - rd->ctrl->ly) > profile.entries[PR_AN_LEFT_DEADZONE_Y].v.u)
+							ete->swipeEndPoint.y = clamp(ete->swipeEndPoint.y + 
+								((float)(rd->ctrl->ly - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
+								T_SIZE[port].a.y, 
+								T_SIZE[port].b.y);
+					}
 					if (!rd->rr->propagate)
 						rd->analogLeftProp.left = rd->analogLeftProp.right = 
 								rd->analogLeftProp.up = rd->analogLeftProp.down = 0;
 					break;
 				case REMAP_TOUCH_SWIPE_SMART_R:  
-					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx);
-					if (ete == NULL) break; 
-					if (abs(127 - rd->ctrl->rx) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
-						ete->swipeEndPoint.x = clamp(
-							ete->swipeEndPoint.x + 
-								((float)(rd->ctrl->rx - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
-							T_SIZE[port].a.x, 
-							T_SIZE[port].b.x);
-					if (abs(127 - rd->ctrl->ry) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
-						ete->swipeEndPoint.y = clamp(
-							ete->swipeEndPoint.y + 
-								((float)(rd->ctrl->ry - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
-							T_SIZE[port].a.y, 
-							T_SIZE[port].b.y);
+					ete = storeTouchSmartSwipe(&et[port], emu->param.tPoint, rd->port, rd->idx); 
+					if (ete != NULL){
+						if (abs(127 - rd->ctrl->rx) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
+							ete->swipeEndPoint.x = clamp(
+								ete->swipeEndPoint.x + 
+									((float)(rd->ctrl->rx - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
+								T_SIZE[port].a.x, 
+								T_SIZE[port].b.x);
+						if (abs(127 - rd->ctrl->ry) > profile.entries[PR_AN_LEFT_DEADZONE_X].v.u)
+							ete->swipeEndPoint.y = clamp(
+								ete->swipeEndPoint.y + 
+									((float)(rd->ctrl->ry - 127)) * profile.entries[PR_TO_SWIPE_SMART_SENS].v.u / 127,
+								T_SIZE[port].a.y, 
+								T_SIZE[port].b.y);
+					}
 					if (!rd->rr->propagate)
 						rd->analogRightProp.left = rd->analogRightProp.right = 
 								rd->analogRightProp.up = rd->analogRightProp.down = 0;
@@ -990,8 +994,8 @@ int remap_ctrl_readBuffer(int port, SceCtrlData *ctrl, int buffIdx, bool isPosit
 	// Check if call is from Shell
 	int isShell = isCallShell();
 	
-	// Not enough buffers cached
-	if (buffIdx >= cacheCtrl[port][isShell].num)
+	// Not enough buffers cached (buffIdx counts back from the newest: 1 = newest, num = oldest)
+	if (buffIdx < 1 || buffIdx > cacheCtrl[port][isShell].num)
 		return false;
 
 	// Read buffer from cache

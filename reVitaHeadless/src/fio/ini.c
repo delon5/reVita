@@ -10,23 +10,28 @@
 _Static_assert(SECTION_SIZE == 30 && SECTION_ATTR_SIZE == 10 && ENTRY_NAME_SIZE == 30 && ENTRY_VALUE_SIZE == 150,
     "update the sscanf() field widths in ini_nextEntry()");
 
-// Bounded append: never writes past ini->max bytes. On overflow the text is
+// Bounded append: never writes past ini->max bytes. The text is formatted into
+// a local scratch first because libk's (PDCLib) vsnprintf stores literal format
+// characters and the terminator without honouring its size argument, so it
+// cannot be trusted to bound writes into the INI buffer itself. Every ini_*
+// format here produces well under INI_APPEND_MAX bytes (keys <= 30 chars,
+// values <= 31 chars, list items <= 9 chars). On overflow the output is
 // truncated and ini->overflow is set so the caller can refuse to save.
+#define INI_APPEND_MAX 256
 void ini_append(struct INI* ini, const char *fmt, ...) {
-    int room = ini->max - (int)(ini->idx - ini->buff);
-    if (room <= 1){
-        ini->overflow = true;
-        return;
-    }
+    char tmp[INI_APPEND_MAX];
     va_list va;
     va_start (va, fmt);
-    int n = vsnprintf(ini->idx, room, fmt, va);
+    int n = vsnprintf(tmp, sizeof(tmp), fmt, va);
     va_end (va);
-    if (n < 0 || n >= room){
+    int room = ini->max - (int)(ini->idx - ini->buff);   // bytes left, terminator included
+    if (n < 0 || n >= (int)sizeof(tmp) || n >= room){
         ini->overflow = true;
-        ini->idx = &ini->buff[ini->max - 1];
+        if (ini->max > 0)
+            ini->buff[ini->max - 1] = '\0';
         return;
     }
+    memcpy(ini->idx, tmp, n + 1);
     ini->idx += n;
 }
 
@@ -73,37 +78,38 @@ char* ini_nextLine(INI_READER* ini){
     ini->_.EOL[0] = '\0';
     return ini->_.line;
 }
+// Iterative on purpose: one frame per file, however many section or blank
+// lines it contains (the kernel thread stack is small).
 char* ini_nextEntry(INI_READER* ini){
-    if (ini_nextLine(ini) == NULL)
-        return NULL;
-    if (!strlen(ini->_.line)) 
-        return ini_nextEntry(ini);
-    if (ini->_.line[0] == '[') { // Looks like section
-        char section[SECTION_SIZE];
-        char sectionAttr[SECTION_ATTR_SIZE];
-        if (sscanf(ini->_.line, "[%29[^:]:%9[^]]", section, sectionAttr) == 2){ // Section with attr
-            strcpy(ini->section, section);
-            strcpy(ini->sectionAttr, sectionAttr);
-            return ini_nextEntry(ini);
-        } else if (sscanf (ini->_.line, "[%29[^]]", section) == 1){ // Section without attr
-            strcpy(ini->section, section);
-            return ini_nextEntry(ini);
-        }// Error parsing
-    } else if (strchr(ini->_.line, '=')){ // Looks like Entry
-        char key[ENTRY_NAME_SIZE];
-        char value[ENTRY_VALUE_SIZE];
-        int num = sscanf (ini->_.line, "%29[^=]=%149s", key, value);
-        //ToDo sscanf seems to be broken, it should work
-        // int num = sscanf (ini->_.line, "%[^=]=%[^;#]", key, value);
-        if (num >= 1){
-            strcpy(ini->name, key);
-            strcpy(ini->val, num == 2 ? value : "");
-            strcpy(ini->listVal, "");
-            ini->_.EOE = NULL;
-            return ini->name;
-        } // Error parsing
+    for (;;){
+        if (ini_nextLine(ini) == NULL)
+            return NULL;
+        if (!strlen(ini->_.line)) 
+            continue;
+        if (ini->_.line[0] == '[') { // Looks like section
+            char section[SECTION_SIZE];
+            char sectionAttr[SECTION_ATTR_SIZE];
+            if (sscanf(ini->_.line, "[%29[^:]:%9[^]]", section, sectionAttr) == 2){ // Section with attr
+                strcpy(ini->section, section);
+                strcpy(ini->sectionAttr, sectionAttr);
+            } else if (sscanf (ini->_.line, "[%29[^]]", section) == 1){ // Section without attr
+                strcpy(ini->section, section);
+                ini->sectionAttr[0] = '\0';
+            }// Error parsing: skip the line
+            continue;
+        } else if (strchr(ini->_.line, '=')){ // Looks like Entry
+            char key[ENTRY_NAME_SIZE];
+            char value[ENTRY_VALUE_SIZE];
+            int num = sscanf (ini->_.line, "%29[^=]=%149s", key, value);
+            if (num >= 1){
+                strcpy(ini->name, key);
+                strcpy(ini->val, num == 2 ? value : "");
+                strcpy(ini->listVal, "");
+                ini->_.EOE = NULL;
+                return ini->name;
+            } // Error parsing: skip the line
+        }
     }
-    return ini_nextEntry(ini);
 }
 char* ini_nextListVal(INI_READER* ini){
     if (ini->_.EOE == ini->_.EOL)          //End of list reached
@@ -163,7 +169,10 @@ void addNumber(int* val, uint8_t number, uint8_t pos){
 int parseBGR(char* c){
     //sscnf cannot parse HEX unfortunatly - had to do it manually
     int ret = 0xFF000000;
-    for (int i = 0; i < strlen(c) - 1; i++){
+    if (c == NULL)
+        return ret;
+    size_t len = strlen(c);           // "#RRGGBB": hex digits at c[1..6]
+    for (size_t i = 0; i + 1 < len && i < 6; i++){
         switch(c[i + 1]){
             case '1': addNumber(&ret, 0x1, i); break;
             case '2': addNumber(&ret, 0x2, i); break;

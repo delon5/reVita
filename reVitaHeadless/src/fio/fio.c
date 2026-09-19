@@ -67,11 +67,9 @@ bool fio_writeFile(char* buff, int size, char* path, char* name, char* ext){
 	SceUID fd = ksceIoOpen(fname, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
 	if (fd < 0)
 		return false;
-	ksceIoWrite(fd, buff, size);
-	if (ksceIoClose(fd) < 0)
-		return false;
-
-	return true;
+	int written = ksceIoWrite(fd, buff, size);
+	int closed = ksceIoClose(fd);
+	return written == size && closed >= 0;
 }
 bool fio_deleteFile(char* path, char* name, char* ext){
 	char fname[128];

@@ -120,7 +120,7 @@ Want to use DS3 / DS4 ? Check this page [here](../../wiki/External-Controllers) 
   - Save it as Shared profile (Profile > Profile management > Save as Shared)
   - Go back to the game
   - Press **START**+**CROSS**(configurable under Settings > Hotkeys) to import Shared profile.
-- "Buy more RAM" error popup on menu open (versions up to 1.1.2) - the menu used to allocate a 512 KB kernel buffer every time it opened, which failed when other heavy kernel plugins (ucdc, PSVShell) had used up the kernel memory. Since 1.2 the menu draws into a small static buffer, so the popup no longer exists; update reVita.
+- "Buy more RAM" error popup on menu open (versions up to 1.1.2) - the menu used to allocate a 512 KB kernel buffer every time it opened, which failed when other heavy kernel plugins (ucdc, PSVShell) had used up the kernel memory. Since 1.2.0 the menu draws into a small static buffer, so the popup no longer exists; update reVita.
 - Crash, when closing the menu
   - update reVita and ds34vita to latest versions (from github) 
 ## Build
