@@ -53,6 +53,13 @@ the intended colour (opaque black or the theme background). The old code filled 
 byte of the colour, which produced alpha 0 black for the dark theme; on the SceShell overlay plane that used to
 show as transparent.
 
+Added in 1.2.2, outside the memory work: the menu is also drawn when Adrenaline presents PSP-resolution frames
+through the compat display syscall (`_sceDisplaySetFrameBufForCompat`, Graphics Filtering "Original", no GePatch).
+ScePspemu keeps that frame as 480 x 272 ABGR8888 pixels with a 512-pixel pitch at 0x74000000 in its own address
+space, so reVita hooks the syscall and draws into that frame (`main.c`), with a redraw from its own thread when the
+game stops flipping. It stays out of the way for 100 ms after any frame that came through the normal path, so the
+menu is not drawn twice when Adrenaline filters or GePatch are active.
+
 Not done (deliberately): shrinking the three `Profile` copies or `MenuEntry` (under 4 KB, and the `Profile` layout
 is exported to `reVitaMotion`); dirty-frame tracking and row-buffered popup drawing (CPU only, no RAM).
 

@@ -26,6 +26,21 @@ uint32_t fbWidth, fbHeight, fbPitch;
 #define LINE_MAX 480
 static uint32_t line[LINE_MAX];
 
+// Framebuffer writes normally target the process that called the display
+// syscall; the PSP emulator fallback draws from reVita's own thread instead.
+static SceUID targetPid = -1;
+
+void renderer_setTargetProcess(SceUID pid){
+	targetPid = pid;
+}
+
+static inline void fbCopy(void* dst, const void* src, SceSize len){
+	if (targetPid >= 0)
+		ksceKernelCopyToUserProc(targetPid, dst, src, len);
+	else
+		ksceKernelMemcpyKernelToUser(dst, src, len);
+}
+
 #define UI_CORNER_RADIUS 9
 #define ANIMATION_TIME  120000
 static const unsigned char UI_CORNER_OFF[UI_CORNER_RADIUS] = {9, 7, 5, 4, 3, 2, 2, 1, 1};
@@ -39,7 +54,7 @@ bool readPixel(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const unsigned ch
 
 void drawPixel(int32_t x, int32_t y, uint32_t color){
 	if (x >= 0 && x < fbWidth && y >= 0 && y < fbHeight)
-		ksceKernelMemcpyKernelToUser((void*)&fb_base[y * fbPitch + x], &color, sizeof(color));
+		fbCopy((void*)&fb_base[y * fbPitch + x], &color, sizeof(color));
 }
 
 void renderer_blankFrame(){
@@ -48,7 +63,7 @@ void renderer_blankFrame(){
 	for (uint32_t i = 0; i < fbHeight; i++)
 		for (uint32_t x = 0; x < fbWidth; x += LINE_MAX){
 			uint32_t n = min(fbWidth - x, (uint32_t)LINE_MAX);
-			ksceKernelMemcpyKernelToUser((void*)&fb_base[i * fbPitch + x], line, n * sizeof(uint32_t));
+			fbCopy((void*)&fb_base[i * fbPitch + x], line, n * sizeof(uint32_t));
 		}
 }
 
@@ -123,7 +138,7 @@ void renderer_drawRectangle(int32_t x, int32_t y, int32_t w, int32_t h) {
 		line[i] = color;
 	for (int32_t j = y0; j < y1; j++)
 		for (int32_t xx = x0; xx < x1; xx += n)
-			ksceKernelMemcpyKernelToUser((void*)&fb_base[j * fbPitch + xx], line,
+			fbCopy((void*)&fb_base[j * fbPitch + xx], line,
 				min(x1 - xx, (int32_t)n) * sizeof(uint32_t));
 }
 
@@ -219,7 +234,7 @@ void renderer_writeFromVFB(int64_t tickOpened, bool anim){
 			off = UI_CORNER_OFF[uiHeight - i];
 		}
 		rendererv_expandRow(i + ui_cutout, line);
-		ksceKernelMemcpyKernelToUser(
+		fbCopy(
 			(void*)&fb_base[(ui_yCalculated + i) * fbPitch + ui_x + off],
 			&line[off],
 			sizeof(uint32_t) * (uiWidth - 2 * off));

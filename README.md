@@ -1,4 +1,4 @@
-# reVita v.1.2.1 | [Wiki](../../wiki) | [PS TV Configs](https://github.com/DerpyBubblez/reVita-Configs)
+# reVita v.1.2.2 | [Wiki](../../wiki) | [PS TV Configs](https://github.com/DerpyBubblez/reVita-Configs)
 **reVita** is a plugin for PS Vita / PS TV, which allows you to remap inputs and trigger different actions. It is a continuation of [Rinnegatamante](https://github.com/Rinnegatamante)'s **[remaPSV](https://github.com/Rinnegatamante/remaPSV)**, which was fully rewritten as a kernel plugin.
 
 [Here](https://github.com/DerpyBubblez/reVita-Configs) you can find ready to use [PS TV Configs](https://github.com/DerpyBubblez/reVita-Configs) by [Derpy](https://github.com/DerpyBubblez)
@@ -71,7 +71,7 @@ Want to use DS3 / DS4 ? Check this page [here](../../wiki/External-Controllers) 
 
 ### Compatibility with Apps
 
-- Adrenaline - to get UI working, you need to change **Adrenaline Settings -> Graphics Filtering** to anything else **except** original.
+- Adrenaline - since 1.2.2 the menu also shows with **Graphics Filtering** set to **Original** (reVita draws straight into the PSP frame). On older versions, change **Adrenaline Settings -> Graphics Filtering** to anything else **except** original, or use GePatch.
 - In some of hombrews and PSP/PS1 games GUI won't work - use **Shared profile** method for them. [[How To]](https://github.com/MERLev/reVita#known-issues).
 
 ## Installation
@@ -113,7 +113,7 @@ Want to use DS3 / DS4 ? Check this page [here](../../wiki/External-Controllers) 
 ## Known issues
 
 - Menu not opening in Adrenaline
-  - Change **Adrenaline Settings -> Graphics Filtering** to anything else **except** original.
+  - Update to reVita 1.2.2 or newer. Before that, change **Adrenaline Settings -> Graphics Filtering** to anything else **except** original.
 - Menu not opening
   - Minimise app
   - Setup config you need while on LiveArea

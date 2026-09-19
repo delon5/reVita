@@ -12,6 +12,7 @@
 #include "vitasdkext.h"
 #include "main.h"
 #include "gui/gui.h"
+#include "gui/renderer.h"
 #include "remap.h"
 #include "fio/profile.h"
 #include "fio/theme.h"
@@ -36,6 +37,18 @@
 #define THREAD_MAIN_DELAY           (16##666)
 #define GUI_CLOSE_DELAY            (250##000)
 #define THE_FLOW_MAGIC              0x6183015
+
+// Adrenaline with Graphics Filtering set to "Original" (and no GePatch) never
+// presents a Vita framebuffer: ScePspemu keeps the PSP frame as 480x272 ABGR8888
+// pixels with a pitch of 512 at this address in its own address space and
+// flips it through the compat display syscall, which the normal framebuffer
+// hook never sees. reVita draws straight into that frame instead.
+#define PSPEMU_FRAMEBUFFER          ((void*)0x74000000)
+#define PSPEMU_FRAMEBUFFER_PITCH    512
+#define PSPEMU_SCREEN_WIDTH         480
+#define PSPEMU_SCREEN_HEIGHT        272
+#define NATIVE_FRAME_GRACE         (100##000)	// prefer the normal path while it is active
+#define COMPAT_FRAME_STALE          (40##000)	// redraw from our thread when the game stops flipping
 
 #define WHITELIST_NUM 18
 static char* whitelistNPXS[WHITELIST_NUM] = {
@@ -112,6 +125,21 @@ bool ds34vitaRunning;
 
 static uint64_t startTick;
 static bool isDelayedStartDone = false;
+static int64_t tickLastNativeFrame = 0;	// last gui_draw through ksceDisplaySetFrameBufInternal
+static int64_t tickLastCompatFrame = 0;	// last gui_draw into the PSP emulator frame
+
+static const SceDisplayFrameBuf pspemuFrameBuf = {
+    .size = sizeof(SceDisplayFrameBuf),
+    .base = PSPEMU_FRAMEBUFFER,
+    .pitch = PSPEMU_FRAMEBUFFER_PITCH,
+    .pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8,
+    .width = PSPEMU_SCREEN_WIDTH,
+    .height = PSPEMU_SCREEN_HEIGHT
+};
+
+static bool isPspemuApp(){
+    return appType == APP_PSPEMU || appType == APP_PSPEMU_ABM;
+}
 
 bool isCallKernel(){
     return ksceKernelGetProcessId() == kernelPid;
@@ -420,6 +448,7 @@ int ksceDisplaySetFrameBufInternal_patched(int head, int index, const SceDisplay
         goto DISPLAY_HOOK_RET;
 
     gui_draw(pParam);
+    tickLastNativeFrame = ksceKernelGetSystemTimeWide();
 
     if (gui_isOpen && profile.entries[PR_MO_NO_FLICKER].v.b && sync && appType != APP_SHELL && appType != APP_SYSTEM) {
         // update now to fix flicker when vblank period is missed
@@ -434,6 +463,31 @@ int ksceDisplaySetFrameBufInternal_patched(int head, int index, const SceDisplay
 
 DISPLAY_HOOK_RET:
     return TAI_CONTINUE(int, refs[ksceDisplaySetFrameBufInternal_id], head, index, pParam, sync);
+}
+
+// Draw the UI into the PSP emulator frame, unless the normal framebuffer path
+// is active for it (Adrenaline filters, its own menu, or GePatch), which would
+// otherwise show the menu twice.
+static void drawPspemuFrame(SceUID targetPid){
+    int64_t now = ksceKernelGetSystemTimeWide();
+    if (now - tickLastNativeFrame < NATIVE_FRAME_GRACE)
+        return;
+    if (ksceKernelLockMutex(g_mutex_framebuf_uid, 1, NULL) < 0)
+        return;
+    renderer_setTargetProcess(targetPid);
+    gui_draw(&pspemuFrameBuf);
+    renderer_setTargetProcess(-1);
+    tickLastCompatFrame = now;
+    ksceKernelUnlockMutex(g_mutex_framebuf_uid, 1);
+}
+
+// Compat display syscall (SceDisplay, _sceDisplaySetFrameBufForCompat): called
+// by ScePspemu when it flips a PSP frame. Runs in the ScePspemu process.
+int ksceDisplaySetFrameBufForCompat_patched(int a1, int a2, int a3, void *pOpt) {
+    used_funcs[ksceDisplaySetFrameBufForCompat_id] = 1;
+    if (shellPid > 0 && isPspemuApp() && isCallActive())
+        drawPspemuFrame(-1);
+    return TAI_CONTINUE(int, refs[ksceDisplaySetFrameBufForCompat_id], a1, a2, a3, pOpt);
 }
 
 bool isAppAllowed(char* tId){
@@ -571,6 +625,12 @@ static int main_thread(SceSize args, void *argp) {
 
         if (gui_isOpen) {
             gui_input(&ctrl);
+
+            // A paused PSP game stops flipping, so the compat hook stops
+            // running: keep the menu responsive by redrawing from here.
+            if (isPspemuApp() && processid > 0 && tickLastCompatFrame > 0
+                    && ksceKernelGetSystemTimeWide() - tickLastCompatFrame > COMPAT_FRAME_STALE)
+                drawPspemuFrame(processid);
         }
 
         if (!gui_isOpen){
@@ -733,6 +793,7 @@ int module_start(SceSize argc, const void *args) {
 	HOOK_EXPORT(SceCtrl,       TAI_ANY_LIBRARY, 0xF11D0D30, ksceCtrlGetControllerPortInfo);
 	HOOK_IMPORT(SceCtrl,       0xE2C40624,      0x9DCB4B7A, ksceKernelGetProcessId);
 	HOOK_EXPORT(SceDisplay,    0x9FED47AC,      0x16466675, ksceDisplaySetFrameBufInternal);
+	HOOK_EXPORT(SceDisplay,    0x5ED8F994,      0x45BCB941, ksceDisplaySetFrameBufForCompat);	// PSP emulator frames
 	HOOK_IMPORT(SceProcessmgr, 0x887F19D0,      0x414CC813, ksceKernelInvokeProcEventHandler);
 	HOOK_EXPORT(SceRegistryMgr, 0xB2223AEB, 0xD72EA399, ksceRegMgrSetKeyInt);
 	HOOK_EXPORT(SceRegistryMgr, 0xB2223AEB, 0x16DDF3DC, ksceRegMgrGetKeyInt);

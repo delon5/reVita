@@ -21,6 +21,9 @@ void renderer_drawRectangle(int32_t x, int32_t y, int32_t w, int32_t h);
 
 void renderer_blankFrame();
 void renderer_setFB(const SceDisplayFrameBuf *param);
+// Direct the framebuffer copies at another process (pid >= 0) instead of the
+// current one; pass -1 to go back to the calling process.
+void renderer_setTargetProcess(SceUID pid);
 void renderer_writeFromVFB(int64_t timeFromOpene, bool anim);
 
 void renderer_setColor(uint32_t clr);

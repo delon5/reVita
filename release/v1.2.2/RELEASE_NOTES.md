@@ -1,4 +1,7 @@
-## reVita 1.2.1
+## reVita 1.2.2
+
+### Menu in Adrenaline with "Original" graphics filtering
+With Graphics Filtering set to Original and no GePatch, Adrenaline shows PSP frames through a separate display path that reVita never saw, so the menu did not appear. reVita now hooks that path and draws the menu (and popups) straight into the PSP frame. Filtered modes and GePatch keep working as before. This path is new and untested on hardware; if the menu looks wrong there, switch Graphics Filtering away from Original as before and report it.
 
 ### The "Buy more RAM !" popup is gone
 The menu used to allocate a 512 KB kernel memory block every time it opened. On systems with other heavy kernel plugins (ucdc, PSVShell) that allocation failed and the menu refused to open. The menu now draws into a small static buffer inside the plugin (64 KB, palette indexed), so opening it allocates nothing and cannot fail.
